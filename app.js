@@ -259,6 +259,25 @@ function updateConnectionStatus(mode) {
 // 2b. GitHub Gist Data Integration
 // ==========================================
 
+function mergeTransactions(localTx, cloudTx) {
+    const txMap = new Map();
+    
+    // Add all cloud transactions first
+    cloudTx.forEach(tx => {
+        if (tx.id) txMap.set(tx.id, tx);
+    });
+    
+    // Add all local transactions (overwriting if ID conflicts, which is fine since local edits are canonical)
+    localTx.forEach(tx => {
+        if (tx.id) txMap.set(tx.id, tx);
+    });
+    
+    // Convert back to array and sort chronologically by date
+    const merged = Array.from(txMap.values());
+    merged.sort((a, b) => new Date(a.date) - new Date(b.date));
+    return merged;
+}
+
 function initGitHubSync() {
     if (!state.githubToken) {
         updateConnectionStatus('local');
@@ -269,40 +288,92 @@ function initGitHubSync() {
     updateConnectionStatus('github_loading');
     
     if (state.githubGistId) {
-        fetch(`https://api.github.com/gists/${state.githubGistId}`, {
+        fetchGist(state.githubGistId);
+    } else {
+        // Auto-discover existing gist by checking user's list of gists
+        fetch('https://api.github.com/gists', {
             headers: {
                 'Authorization': `token ${state.githubToken}`,
                 'Accept': 'application/vnd.github.v3+json'
             }
         })
         .then(response => {
-            if (response.status === 404) {
-                throw new Error("Gist not found");
-            }
             if (!response.ok) {
-                throw new Error("GitHub error: " + response.statusText);
+                throw new Error("Gist list retrieval failed: " + response.statusText);
             }
             return response.json();
         })
-        .then(gist => {
-            const file = gist.files['hisab_nikash_data.json'];
-            if (file && file.content) {
-                state.transactions = JSON.parse(file.content);
-                updateConnectionStatus('github');
-                showToast("গিটহাব থেকে ডাটা লোড করা হয়েছে!", "success");
-                updateUIState();
+        .then(gists => {
+            // Find gist with file 'hisab_nikash_data.json'
+            const matchingGist = gists.find(gist => gist.files && gist.files['hisab_nikash_data.json']);
+            if (matchingGist) {
+                state.githubGistId = matchingGist.id;
+                localStorage.setItem('hn_gh_gist_id', matchingGist.id);
+                document.getElementById('gh-gist-id').value = matchingGist.id;
+                fetchGist(matchingGist.id);
             } else {
-                saveDataToGitHub();
+                createGistAndSync();
             }
         })
         .catch(err => {
-            console.error("Error loading from Gist:", err);
-            showToast("গিটহাব ডাটা লোড করা যায়নি! অফলাইন ডাটা ব্যবহার করা হচ্ছে।", "danger");
-            loadLocalData();
+            console.error("Gist discovery error:", err);
+            createGistAndSync();
         });
-    } else {
-        createGistAndSync();
     }
+}
+
+function fetchGist(gistId) {
+    fetch(`https://api.github.com/gists/${gistId}`, {
+        headers: {
+            'Authorization': `token ${state.githubToken}`,
+            'Accept': 'application/vnd.github.v3+json'
+        }
+    })
+    .then(response => {
+        if (response.status === 404) {
+            // Clear invalid Gist ID and recreate
+            state.githubGistId = '';
+            localStorage.removeItem('hn_gh_gist_id');
+            document.getElementById('gh-gist-id').value = '';
+            createGistAndSync();
+            return;
+        }
+        if (!response.ok) {
+            throw new Error("Gist fetch failed: " + response.statusText);
+        }
+        return response.json();
+    })
+    .then(gist => {
+        if (!gist) return;
+        const file = gist.files['hisab_nikash_data.json'];
+        if (file && file.content) {
+            const cloudTx = JSON.parse(file.content);
+            const localTx = JSON.parse(localStorage.getItem('hn_transactions_local') || '[]');
+            
+            // Bidirectional merge
+            const merged = mergeTransactions(localTx, cloudTx);
+            
+            state.transactions = merged;
+            localStorage.setItem('hn_transactions_local', JSON.stringify(merged));
+            
+            updateConnectionStatus('github');
+            showToast("গিটহাব থেকে ডাটা লোড ও সিঙ্ক করা হয়েছে!", "success");
+            
+            // If the local database had unsynced entries, save them to the cloud immediately
+            if (merged.length > cloudTx.length) {
+                saveDataToGitHub();
+            }
+            
+            updateUIState();
+        } else {
+            saveDataToGitHub();
+        }
+    })
+    .catch(err => {
+        console.error("Error fetching Gist details:", err);
+        showToast("গিটহাব ডাটা লোড করা যায়নি! অফলাইন ডাটা ব্যবহার করা হচ্ছে।", "danger");
+        loadLocalData();
+    });
 }
 
 function createGistAndSync() {
@@ -334,7 +405,7 @@ function createGistAndSync() {
     })
     .then(response => {
         if (!response.ok) {
-            throw new Error("GitHub error: " + response.statusText);
+            throw new Error("GitHub Gist creation failed: " + response.statusText);
         }
         return response.json();
     })
@@ -375,7 +446,7 @@ function saveDataToGitHub() {
     })
     .then(response => {
         if (!response.ok) {
-            throw new Error("GitHub error: " + response.statusText);
+            throw new Error("GitHub Gist save failed: " + response.statusText);
         }
         updateConnectionStatus('github');
     })
@@ -789,25 +860,28 @@ function populateFirebaseFields(config) {
 function handlePrintPDF() {
     const printSection = document.getElementById('print-section');
     printSection.innerHTML = '';
+    
+    // Temporarily make it block for rendering
+    printSection.style.display = 'block';
 
     const start = document.getElementById('stmt-start-date').value;
     const end = document.getElementById('stmt-end-date').value;
     
     let printHTML = `
-        <div style="font-family:'Hind Siliguri', sans-serif; padding: 30px;">
+        <div style="font-family:'Hind Siliguri', 'Outfit', sans-serif; padding: 25px; background: white; color: #1e293b;">
             <div style="text-align: center; border-bottom: 2px solid #2563eb; padding-bottom: 10px; margin-bottom: 20px;">
-                <h1 style="margin: 0; color: #2563eb;">হিসাব নিকাশ (Hisab Nikash)</h1>
-                <p style="margin: 5px 0 0; color: #64748b;">ডিজিটাল খতিয়ান স্টেটমেন্ট রিপোর্ট</p>
-                <p style="margin: 2px 0 0; font-size: 13px;">সীমা: ${formatDateBengali(start)} থেকে ${formatDateBengali(end)}</p>
+                <h1 style="margin: 0; color: #2563eb; font-size: 24px;">হিসাব নিকাশ (Hisab Nikash)</h1>
+                <p style="margin: 5px 0 0; color: #64748b; font-size: 14px;">ডিজিটাল খতিয়ান স্টেটমেন্ট রিপোর্ট</p>
+                <p style="margin: 2px 0 0; font-size: 12px; color: #94a3b8;">সীমা: ${formatDateBengali(start)} থেকে ${formatDateBengali(end)}</p>
             </div>
             
             <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
                 <thead>
                     <tr style="background-color: #f1f5f9; border-bottom: 1px solid #cbd5e1;">
-                        <th style="padding: 12px 10px; text-align: left; font-size:14px; border:1px solid #e2e8f0; width: 120px;">তারিখ</th>
-                        <th style="padding: 12px 10px; text-align: left; font-size:14px; border:1px solid #e2e8f0;">খাত / বিবরণ</th>
-                        <th style="padding: 12px 10px; text-align: center; font-size:14px; border:1px solid #e2e8f0; width: 100px;">ধরন</th>
-                        <th style="padding: 12px 10px; text-align: right; font-size:14px; border:1px solid #e2e8f0; width: 150px;">টাকা</th>
+                        <th style="padding: 10px; text-align: left; font-size:12px; border:1px solid #e2e8f0; width: 100px;">তারিখ</th>
+                        <th style="padding: 10px; text-align: left; font-size:12px; border:1px solid #e2e8f0;">খাত / বিবরণ</th>
+                        <th style="padding: 10px; text-align: center; font-size:12px; border:1px solid #e2e8f0; width: 80px;">ধরন</th>
+                        <th style="padding: 10px; text-align: right; font-size:12px; border:1px solid #e2e8f0; width: 120px;">টাকা</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -821,17 +895,17 @@ function handlePrintPDF() {
     sorted.forEach(tx => {
         if (tx.date < start || tx.date > end) return;
         
-        const typeStr = tx.type === 'income' ? '<span style="color:#059669;">জমা (In)</span>' : '<span style="color:#dc2626;">খরচ (Out)</span>';
+        const typeStr = tx.type === 'income' ? '<span style="color:#059669; font-weight: 600;">জমা (In)</span>' : '<span style="color:#dc2626; font-weight: 600;">খরচ (Out)</span>';
 
         if (tx.type === 'income') totalIn += tx.amount;
         if (tx.type === 'expense') totalOut += tx.amount;
 
         printHTML += `
             <tr style="border-bottom: 1px solid #e2e8f0;">
-                <td style="padding: 12px 10px; font-size:13px; border:1px solid #e2e8f0;">${formatDateBengali(tx.date)}</td>
-                <td style="padding: 12px 10px; font-size:13px; border:1px solid #e2e8f0;">${tx.desc}</td>
-                <td style="padding: 12px 10px; font-size:13px; text-align:center; border:1px solid #e2e8f0;">${typeStr}</td>
-                <td style="padding: 12px 10px; font-size:13px; text-align:right; font-weight:600; border:1px solid #e2e8f0;">৳${tx.amount.toLocaleString('bn-BD')}</td>
+                <td style="padding: 10px; font-size:12px; border:1px solid #e2e8f0;">${formatDateBengali(tx.date)}</td>
+                <td style="padding: 10px; font-size:12px; border:1px solid #e2e8f0;">${tx.desc}</td>
+                <td style="padding: 10px; font-size:12px; text-align:center; border:1px solid #e2e8f0;">${typeStr}</td>
+                <td style="padding: 10px; font-size:12px; text-align:right; font-weight:600; border:1px solid #e2e8f0;">৳${tx.amount.toLocaleString('bn-BD')}</td>
             </tr>
         `;
     });
@@ -840,13 +914,13 @@ function handlePrintPDF() {
                 </tbody>
             </table>
             
-            <div style="margin-top: 30px; display:flex; justify-content: flex-end; gap: 40px; font-size: 15px; font-weight:700;">
+            <div style="margin-top: 25px; border-top: 1.5px solid #cbd5e1; padding-top: 15px; display:flex; justify-content: flex-end; gap: 30px; font-size: 13px; font-weight:700;">
                 <div>মোট জমা (In): <span style="color:#059669;">৳${totalIn.toLocaleString('bn-BD')}</span></div>
                 <div>মোট খরচ (Out): <span style="color:#dc2626;">৳${totalOut.toLocaleString('bn-BD')}</span></div>
-                <div style="border-left: 2px solid #cbd5e1; padding-left: 20px;">নিট ক্যাশফ্লো (অবশিষ্ট): ৳${(totalIn - totalOut).toLocaleString('bn-BD')}</div>
+                <div style="border-left: 2px solid #cbd5e1; padding-left: 15px;">অবশিষ্ট ক্যাশ: ৳${(totalIn - totalOut).toLocaleString('bn-BD')}</div>
             </div>
             
-            <div style="margin-top: 100px; display:flex; justify-content: space-between; font-size: 12px; color: #64748b;">
+            <div style="margin-top: 50px; display:flex; justify-content: space-between; font-size: 11px; color: #94a3b8;">
                 <div>রিপোর্ট প্রস্তুতকারী: হিসাব নিকাশ অ্যাপ</div>
                 <div>রিপোর্ট তৈরির তারিখ: ${formatDateBengali(new Date().toISOString().split('T')[0])}</div>
             </div>
@@ -854,7 +928,31 @@ function handlePrintPDF() {
     `;
 
     printSection.innerHTML = printHTML;
-    window.print();
+
+    // html2pdf options
+    const opt = {
+        margin:       10,
+        filename:     `Hisab_Nikash_Statement_${start}_to_${end}.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2, useCORS: true },
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+
+    showToast("পিডিএফ তৈরি হচ্ছে, অনুগ্রহ করে অপেক্ষা করুন...", "info");
+
+    // Generate and save
+    html2pdf().from(printSection).set(opt).save()
+        .then(() => {
+            printSection.innerHTML = '';
+            printSection.style.display = 'none';
+            showToast("পিডিএফ ডাউনলোড সম্পন্ন হয়েছে!", "success");
+        })
+        .catch(err => {
+            console.error("PDF generation failed:", err);
+            printSection.innerHTML = '';
+            printSection.style.display = 'none';
+            showToast("পিডিএফ ডাউনলোড ব্যর্থ হয়েছে!", "danger");
+        });
 }
 
 // ==========================================
