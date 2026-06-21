@@ -262,14 +262,17 @@ function updateConnectionStatus(mode) {
 function mergeTransactions(localTx, cloudTx) {
     const txMap = new Map();
     
+    const safeCloudTx = Array.isArray(cloudTx) ? cloudTx : [];
+    const safeLocalTx = Array.isArray(localTx) ? localTx : [];
+    
     // Add all cloud transactions first
-    cloudTx.forEach(tx => {
-        if (tx.id) txMap.set(tx.id, tx);
+    safeCloudTx.forEach(tx => {
+        if (tx && tx.id) txMap.set(tx.id, tx);
     });
     
     // Add all local transactions (overwriting if ID conflicts, which is fine since local edits are canonical)
-    localTx.forEach(tx => {
-        if (tx.id) txMap.set(tx.id, tx);
+    safeLocalTx.forEach(tx => {
+        if (tx && tx.id) txMap.set(tx.id, tx);
     });
     
     // Convert back to array and sort chronologically by date
