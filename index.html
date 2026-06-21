@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hisab Nikash | ডিজিটাল হিসাব খাতা</title>
+    <link rel="stylesheet" href="styles.css">
+    
+    <!-- PWA Meta Elements -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#2563eb">
+    
+    <!-- Firebase SDK Compat (Required for cloud sync) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+
+    <div id="app-container">
+        
+
+
+        <!-- App Header -->
+        <header>
+            <div class="header-title-container">
+                <div class="logo-icon">হ</div>
+                <h1>হিসাব নিকাশ</h1>
+            </div>
+            <div class="header-actions">
+                <span id="sync-status" class="connection-badge local">স্থানীয় মেমরি</span>
+                <button id="theme-toggle" class="header-btn">
+                    <!-- Light theme icon -->
+                    <svg id="theme-sun-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:20px;height:20px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 9H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m2.828-9.9a5 5 0 117.07 7.07l-7.07-7.07z"></path></svg>
+                    <!-- Dark theme icon (hidden by default) -->
+                    <svg id="theme-moon-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:20px;height:20px;display:none;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main>
+            
+            <!-- Dashboard Panel -->
+            <div id="panel-dashboard" class="panel active">
+                
+                <!-- Total Balance -->
+                <div class="total-balance-card">
+                    <p class="balance-label">মোট ব্যালেন্স</p>
+                    <div class="balance-amount">
+                        <span class="currency">৳</span>
+                        <span id="dashboard-total-balance">0.00</span>
+                    </div>
+                    <div class="balance-flow">
+                        <div class="flow-item in">
+                            <div class="flow-icon">
+                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:20px;height:20px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11l5-5m0 0l5 5m-5-5v12"></path></svg>
+                            </div>
+                            <div class="flow-details">
+                                <p>মোট জমা (Tk Add)</p>
+                                <h4>৳<span id="dashboard-total-in">0.00</span></h4>
+                            </div>
+                        </div>
+                        <div class="flow-item out">
+                            <div class="flow-icon">
+                                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:20px;height:20px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 13l-5 5m0 0l-5-5m5 5V6"></path></svg>
+                            </div>
+                            <div class="flow-details">
+                                <p>মোট খরচ (Tk Out)</p>
+                                <h4>৳<span id="dashboard-total-out">0.00</span></h4>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="quick-action-row">
+                    <button class="quick-action-btn income-btn" onclick="openAddTransactionModal('income')">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:16px;height:16px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                        টাকা জমা (In)
+                    </button>
+                    <button class="quick-action-btn expense-btn" onclick="openAddTransactionModal('expense')">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:16px;height:16px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path></svg>
+                        টাকা খরচ (Out)
+                    </button>
+                </div>
+
+                <!-- Recent Transactions -->
+                <div class="transaction-list-card">
+                    <div class="transaction-list-header">
+                        <h3 class="section-title">সাম্প্রতিক লেনদেন</h3>
+                        <a class="view-all-link" id="nav-to-transactions">সব দেখুন</a>
+                    </div>
+                    <div class="transaction-feed" id="dashboard-recent-transactions">
+                        <!-- Rendered by JS -->
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Transactions Panel -->
+            <div id="panel-transactions" class="panel">
+                <div class="search-filter-card">
+                    <div class="input-wrapper">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                        <input type="text" id="tx-search-input" placeholder="লেনদেন অনুসন্ধান করুন (খাত বা বিবরণ)...">
+                    </div>
+                    <div class="filter-row">
+                        <button class="filter-btn active" data-filter="all">সব</button>
+                        <button class="filter-btn" data-filter="income">জমা (In)</button>
+                        <button class="filter-btn" data-filter="expense">খরচ (Out)</button>
+                    </div>
+                </div>
+                
+                <div class="transaction-list-card">
+                    <div class="transaction-feed" id="full-transactions-list" style="max-height: 480px;">
+                        <!-- Rendered by JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Statements Panel -->
+            <div id="panel-statements" class="panel">
+                <div class="search-filter-card">
+                    <div class="form-group">
+                        <label for="stmt-start-date">শুরুর তারিখ</label>
+                        <div class="input-wrapper">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                            <input type="date" id="stmt-start-date">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="stmt-end-date">শেষের তারিখ</label>
+                        <div class="input-wrapper">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                            <input type="date" id="stmt-end-date">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="statement-summary-card">
+                    <h3 class="section-title">রিপোর্ট ওভারভিউ</h3>
+                    <div class="stmt-row">
+                        <span>মোট লেনদেন সংখ্যা</span>
+                        <span id="stmt-summary-count" style="font-weight: 600;">0টি</span>
+                    </div>
+                    <div class="stmt-row">
+                        <span>মোট জমা (Tk Add)</span>
+                        <span id="stmt-summary-in" style="color:var(--color-success); font-weight:700;">৳0.00</span>
+                    </div>
+                    <div class="stmt-row">
+                        <span>মোট খরচ (Tk Out)</span>
+                        <span id="stmt-summary-out" style="color:var(--color-danger); font-weight:700;">৳0.00</span>
+                    </div>
+                    <div class="stmt-row total">
+                        <span>নিট ক্যাশফ্লো (অবশিষ্ট)</span>
+                        <span id="stmt-summary-net">৳0.00</span>
+                    </div>
+                    
+                    <button class="download-statement-btn" id="stmt-print-btn">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:16px;height:16px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                        PDF স্টেটমেন্ট ডাউনলোড / প্রিন্ট করুন
+                    </button>
+                </div>
+            </div>
+
+            <!-- Settings Panel -->
+            <div id="panel-settings" class="panel">
+                <div class="settings-section-card">
+                    <h3 class="section-title">অ্যাপ কনফিগারেশন</h3>
+                    
+                    <div class="switch-container">
+                        <div class="switch-label-desc">
+                            <span class="title">ডার্ক থিম (Dark Mode)</span>
+                            <span class="desc">চোখের আরামের জন্য কালো ইন্টারফেস</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="settings-dark-switch">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="switch-container">
+                        <div class="switch-label-desc">
+                            <span class="title">ক্লাউড সিঙ্ক (Firebase Cloud Sync)</span>
+                            <span class="desc">রিয়েল-টাইমে অনলাইনে তথ্য সুরক্ষিত রাখুন</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="settings-firebase-switch">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <!-- Firebase settings fields -->
+                    <div id="firebase-config-fields">
+                        <div class="form-group">
+                            <label for="fb-api-key">Firebase API Key</label>
+                            <input type="text" id="fb-api-key" placeholder="AIzaSy...">
+                        </div>
+                        <div class="form-group">
+                            <label for="fb-auth-domain">Auth Domain</label>
+                            <input type="text" id="fb-auth-domain" placeholder="project.firebaseapp.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="fb-project-id">Project ID</label>
+                            <input type="text" id="fb-project-id" placeholder="project-id">
+                        </div>
+                        <div class="form-group">
+                            <label for="fb-storage-bucket">Storage Bucket</label>
+                            <input type="text" id="fb-storage-bucket" placeholder="project.appspot.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="fb-app-id">App ID</label>
+                            <input type="text" id="fb-app-id" placeholder="1:12345:web:abcd">
+                        </div>
+                        <button class="auth-btn" style="margin-top:5px; background:linear-gradient(135deg, var(--color-success), var(--color-success-light));" id="fb-save-btn">কনফিগারেশন সেভ করুন</button>
+                    </div>
+
+                    <div class="switch-container">
+                        <div class="switch-label-desc">
+                            <span class="title">গিটহাব সিঙ্ক (GitHub Gist Sync)</span>
+                            <span class="desc">গিটহাবের মাধ্যমে আপনার ডাটা ব্যাকআপ রাখুন</span>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="settings-github-switch">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <!-- GitHub settings fields -->
+                    <div id="github-config-fields">
+                        <div class="form-group">
+                            <label for="gh-token">GitHub Personal Access Token (PAT)</label>
+                            <input type="password" id="gh-token" placeholder="ghp_...">
+                        </div>
+                        <div class="form-group">
+                            <label for="gh-gist-id">Gist ID (ফাঁকা রাখলে অটো তৈরি হবে)</label>
+                            <input type="text" id="gh-gist-id" placeholder="e.g. 5d5a8c2f...">
+                        </div>
+                        <div style="display: flex; gap: 10px;">
+                            <button class="auth-btn" style="flex: 1; margin-top:5px; background:linear-gradient(135deg, var(--color-success), var(--color-success-light));" id="gh-save-btn">সেভ করুন</button>
+                            <button class="auth-btn" style="flex: 1; margin-top:5px; background:linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));" id="gh-sync-now-btn">সিঙ্ক করুন</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+
+        <!-- Navigation Bar (4 items optimized) -->
+        <nav>
+            <div class="nav-item active" data-tab="dashboard">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2v-4zM14 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2v-4z"></path></svg>
+                <span>ড্যাশবোর্ড</span>
+            </div>
+            <div class="nav-item" data-tab="transactions">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
+                <span>লেনদেন</span>
+            </div>
+            <div class="nav-item" data-tab="statements">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 12v-6m-9-9h.01M12 12h.01M15 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+                <span>রিপোর্ট</span>
+            </div>
+            <div class="nav-item" data-tab="settings">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                <span>সেটিংস</span>
+            </div>
+        </nav>
+
+        <!-- Dynamic Modals -->
+        
+        <!-- Add Transaction Modal (Income/Expense) -->
+        <div id="modal-transaction" class="modal-backdrop">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 class="modal-title" id="tx-modal-title">লেনদেন যোগ করুন</h3>
+                    <button class="close-modal-btn" onclick="closeModal('modal-transaction')">✕</button>
+                </div>
+                
+                <input type="hidden" id="tx-type" value="income">
+
+                <div class="form-group">
+                    <label for="tx-amount">টাকার পরিমাণ (৳)*</label>
+                    <div class="input-wrapper">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 8h6m-6 2h6m-6 2h6M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path></svg>
+                        <input type="number" id="tx-amount" placeholder="0.00" min="1" step="any" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="tx-desc">বিবরণ / খাত*</label>
+                    <div class="input-wrapper">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                        <input type="text" id="tx-desc" placeholder="যেমন: বেতন, পণ্য বিক্রয়, বাজার খরচ, বাসা ভাড়া" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="tx-date">তারিখ*</label>
+                    <div class="input-wrapper">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                        <input type="date" id="tx-date" required>
+                    </div>
+                </div>
+
+                <button id="tx-submit-btn" class="auth-btn">সংরক্ষণ করুন</button>
+            </div>
+        </div>
+
+        <!-- Toast Notifications -->
+        <div id="toast" class="toast">
+            <span id="toast-message">লেনদেন সফলভাবে সম্পন্ন হয়েছে!</span>
+        </div>
+
+    </div>
+
+    <!-- Hidden element used for styling the printable page -->
+    <div id="print-section" style="display:none;"></div>
+
+    <script src="app.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js')
+                    .then(reg => console.log('Service Worker registered!'))
+                    .catch(err => console.error('Service Worker registration failed:', err));
+            });
+        }
+    </script>
+</body>
+</html>
